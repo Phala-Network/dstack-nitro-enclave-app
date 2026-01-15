@@ -2,43 +2,35 @@
 
 ## Agenda
 
-1. How dstack-kms on GCP work
-2. Nitro Enclave Key Retrieval Flow
-3. Deploy KMS to GCP
+1. How dstack-kms runs on GCP (TDX)
+2. Nitro Enclave key retrieval (AWS → GCP)
+3. Deploy KMS with dstack-cloud
 
 ---
 
-## 1. How dstack-kms on GCP work
+## 1. How dstack-kms runs on GCP (TDX)
 
-### What Gets Stored
+### Disk protection & key generation
+
+KMS runs inside a GCP TDX VM. On first boot it generates a disk encryption key inside the VM and seals it to the vTPM with a PCR policy.
+
+**First boot:**
+1. Generate random disk key inside TDX
+2. Seal disk key to vTPM with PCR policy
+3. Format LUKS volume with that key
+4. Store root keys on encrypted disk
+
+**Subsequent boots:**
+1. vTPM checks PCR 0, 2, 14
+2. If PCRs match → unseal disk key → mount encrypted disk
+3. If PCRs differ → unseal fails → data stays inaccessible
+
+### What is stored (after disk is sealed)
 
 | File | Purpose |
 |------|---------|
-| `root-ca.key` | Root CA private key (ECDSA P-256) |
+| `root-ca.key`  | Root CA private key (ECDSA P-256) |
 | `root-k256.key` | Ethereum signing key (secp256k1) |
-
-### Storage Security
-
-KMS runs inside a GCP TDX VM. The disk encryption key is generated inside the VM on first boot and sealed to vTPM, bound to specific PCR values.
-
-**PCR Binding Policy** (`sha256:0,2,14`):
-
-| PCR | Content |
-|-----|---------|
-| 0 | Firmware version + memory encryption info |
-| 2 | UKI image (kernel + initrd + initramfs) |
-| 14 | App compose hash |
-
-**First Boot Flow**:
-1. VM generates random disk encryption key inside TDX
-2. Key sealed to vTPM with PCR policy
-3. LUKS volume formatted with the key
-4. Root keys stored on encrypted disk
-
-**Subsequent Boot**:
-1. vTPM checks PCR 0, 2, 14 values
-2. If PCRs match → unseal disk key → mount encrypted disk
-3. If any PCR changed (code/firmware modified) → unseal fails → data inaccessible
 
 ```
 ┌───────────────────────────────────────────────┐
@@ -62,9 +54,17 @@ KMS runs inside a GCP TDX VM. The disk encryption key is generated inside the VM
 └───────────────────────────────────────────────┘
 ```
 
-**Security Guarantee**: Any modification to firmware, OS image, or app configuration will change PCR values, preventing disk key retrieval.
+**PCR binding policy** (`sha256:0,2,14`):
 
-### Key Derivation
+| PCR | Content |
+|-----|---------|
+| 0 | Firmware version + memory encryption info |
+| 2 | UKI image (kernel + initrd + initramfs) |
+| 14 | App compose hash |
+
+**Security guarantee**: Any change to firmware, OS image, or app configuration alters PCRs, blocking disk key retrieval.
+
+### Key derivation
 
 App keys are **derived**, not stored:
 
@@ -81,7 +81,7 @@ k256_key = HKDF(root_k256_key, app_id)
 
 ---
 
-## 2. Nitro Enclave Key Retrieval
+## 2. Nitro Enclave key retrieval (AWS → GCP)
 
 ### Architecture
 
@@ -111,9 +111,9 @@ k256_key = HKDF(root_k256_key, app_id)
                           └──────────────────────┘
 ```
 
-Nitro Enclave has no network access. Traffic goes through vsock to host proxy, then HTTPS to KMS.
+Nitro Enclave has no direct network access. Traffic goes via vsock to the host proxy, then HTTPS to KMS.
 
-### Step-by-Step Flow
+### Step-by-step flow
 
 ```
 ┌─────────────────┐                              ┌─────────────────┐
@@ -146,17 +146,17 @@ Nitro Enclave has no network access. Traffic goes through vsock to host proxy, t
          ▼                                                ▼
 ```
 
-**Key Points**:
-- Step 1-2 happen in Nitro Enclave
-- Step 3-4 happen in KMS
-- NSM quote embedded in TLS client certificate proves enclave identity
-- KMS verifies quote against AWS Nitro root CA before releasing keys
+**Key points**
+- Steps 1–2: inside Nitro Enclave
+- Steps 3–4: inside KMS
+- NSM quote in the TLS client certificate proves enclave identity
+- KMS verifies against AWS Nitro root CA before releasing keys
 
 ---
 
-## Nitro Attestation Deep Dive
+## Nitro attestation details
 
-### NSM Quote Structure
+### NSM quote structure
 
 ```
 COSE_Sign1 {
@@ -169,7 +169,7 @@ COSE_Sign1 {
             1: [48 bytes],  // App image hash
             2: [48 bytes],  // Firmware hash
         },
-        user_data: [64 bytes],  // report_data
+        user_data: [64 bytes],  // report_data filled with TLS pubkey
         timestamp: 1234567890,
         certificate: [DER],     // Leaf cert
         cabundle: [[DER], ...], // Intermediate certs
@@ -178,7 +178,7 @@ COSE_Sign1 {
 }
 ```
 
-### Verification Chain
+### Verification chain
 
 ```
 AWS Nitro Enclaves Root G1 (hardcoded)
@@ -198,9 +198,9 @@ AWS Nitro Enclaves Root G1 (hardcoded)
 
 ---
 
-## Demo: Running in Nitro Enclave
+## Demo: run inside Nitro Enclave
 
-### On Host (EC2 with Nitro Enclave support)
+### On host (EC2 with Nitro Enclave support)
 
 ```bash
 # Build enclave image
@@ -211,7 +211,7 @@ nitro-cli build-enclave --docker-uri get-keys:latest --output-file get-keys.eif
 nitro-cli run-enclave --cpu-count 2 --memory 256 --eif-path get-keys.eif
 ```
 
-### Inside Enclave
+### Inside enclave
 
 ```bash
 # Set proxy (vsock bridge to host network)
@@ -226,11 +226,10 @@ dstack-util get-keys \
 # Output:
 {
   "ca_cert": "-----BEGIN CERTIFICATE-----...",
-  "disk_crypt_key": "base64...",
-  "env_crypt_key": "base64...",
-  "k256_key": "base64...",
-  "k256_signature": "base64...",
-  "gateway_app_id": "0x..."
+  "disk_crypt_key": "0x...",
+  "env_crypt_key": "0x...",
+  "k256_key": "0x...",
+  "k256_signature": "0x...",
 }
 ```
 
@@ -242,7 +241,7 @@ dstack-util get-keys \
 
 ```bash
 # Initialize demo project
-dstack-cloud new --tpm nitro-kms-demo
+dstack-cloud new --key-provider tpm nitro-kms-demo
 cd nitro-kms-demo/
 
 # Inspect/adjust docker-compose.yaml and app.json
