@@ -26,7 +26,10 @@ fi"
 
 # Start tinyproxy and expose it over vsock for enclave HTTP(S)_PROXY
 echo "[remote] Starting tinyproxy and vsock proxy bridge..."
-sudo pkill -f 'tinyproxy.*tinyproxy.get_keys.conf' 2>/dev/null || true
+# Make sure no previous tinyproxy process occupies port 3128
+sudo systemctl stop tinyproxy 2>/dev/null || true
+sudo pkill tinyproxy 2>/dev/null || true
+sleep 1
 nohup sudo tinyproxy -d -c "${SCRIPT_DIR}/tinyproxy.get_keys.conf" > /tmp/tinyproxy.log 2>&1 &
 TINYPROXY_PID=$!
 sleep 2
