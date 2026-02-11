@@ -13,6 +13,8 @@ REMOTE_JSON=${REMOTE_JSON:-/tmp/app_keys.json}
 REMOTE_EIF=${REMOTE_EIF:-/home/ubuntu/dstack-get-keys.eif}
 REMOTE_BIN=${REMOTE_BIN:-/home/ubuntu/dstack-util}
 LOCAL_JSON=${LOCAL_JSON:-"$(pwd)/app_keys.json"}
+LOCAL_ENCLAVE_LOG=${LOCAL_ENCLAVE_LOG:-"$(pwd)/enclave_console.log"}
+LOCAL_NCAT_LOG=${LOCAL_NCAT_LOG:-"$(pwd)/ncat_keys.log"}
 
 if [[ -z "${HOST}" && ! -f deployment.json ]]; then
   echo "Usage: HOST=<public_ip> KMS_URL=<https://kms> ./get_keys.sh" >&2
@@ -38,6 +40,7 @@ if [[ ! -f "${KEY_PATH}" ]]; then
   echo "SSH key not found: ${KEY_PATH}" >&2
   exit 1
 fi
+KEY_PATH="$(cd "$(dirname "${KEY_PATH}")" && pwd)/$(basename "${KEY_PATH}")"
 
 SSH_OPTS=("-o" "StrictHostKeyChecking=no" "-i" "${KEY_PATH}")
 
@@ -73,5 +76,13 @@ ssh "${SSH_OPTS[@]}" "ubuntu@${HOST}" REMOTE_EIF="${REMOTE_EIF}" REMOTE_JSON="${
 
 # Copy the json file back
 scp "${SSH_OPTS[@]}" "ubuntu@${HOST}:${REMOTE_JSON}" "${LOCAL_JSON}" >/dev/null
+scp "${SSH_OPTS[@]}" "ubuntu@${HOST}:/tmp/enclave_console.log" "${LOCAL_ENCLAVE_LOG}" >/dev/null || true
+scp "${SSH_OPTS[@]}" "ubuntu@${HOST}:/tmp/ncat_keys.log" "${LOCAL_NCAT_LOG}" >/dev/null || true
 
 echo "Saved app keys to ${LOCAL_JSON} (size: $(stat -c%s "${LOCAL_JSON}") bytes)"
+if [[ -f "${LOCAL_ENCLAVE_LOG}" ]]; then
+  echo "Saved enclave console log to ${LOCAL_ENCLAVE_LOG}"
+fi
+if [[ -f "${LOCAL_NCAT_LOG}" ]]; then
+  echo "Saved ncat log to ${LOCAL_NCAT_LOG}"
+fi

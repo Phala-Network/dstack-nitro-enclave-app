@@ -1,0 +1,8 @@
+# Generated runtime artifacts
+app_keys.json
+deployment.json
+enclave_console.log
+ncat_keys.log
+
+# Local SSH keys
+nitro-enclave-key*.pem

@@ -54,7 +54,8 @@ sudo bash -lc "source /etc/profile.d/nitro-cli-env.sh && nitro-cli terminate-enc
 sudo rm -f "${REMOTE_JSON}"
 
 # Start vsock listener (host side) to capture keys
-sudo ncat --vsock -l 9999 > "${REMOTE_JSON}" 2>/dev/null &
+sudo rm -f /tmp/ncat_keys.log
+sudo timeout 40 ncat --vsock -l 9999 > "${REMOTE_JSON}" 2>/tmp/ncat_keys.log &
 NCAT_PID=$!
 sleep 2
 
@@ -63,7 +64,9 @@ sudo bash -lc "source /etc/profile.d/nitro-cli-env.sh && nitro-cli run-enclave -
 ENCLAVE_ID=$(sudo bash -lc "source /etc/profile.d/nitro-cli-env.sh && nitro-cli describe-enclaves" | jq -r '.[0].EnclaveID // empty')
 if [ -n "${ENCLAVE_ID}" ]; then
   echo "[remote] Capturing enclave console output..."
-  sudo bash -lc "source /etc/profile.d/nitro-cli-env.sh && timeout 18 nitro-cli console --enclave-id ${ENCLAVE_ID}" 2>&1 || true
+  sudo rm -f /tmp/enclave_console.log
+  sudo bash -lc "source /etc/profile.d/nitro-cli-env.sh && timeout 25 nitro-cli console --enclave-id ${ENCLAVE_ID}" 2>&1 \
+    | sudo tee /tmp/enclave_console.log >/dev/null || true
 fi
 
 # Wait for enclave to finish and data to be written
@@ -72,4 +75,13 @@ sleep 5
 # Stop listener and fix permissions
 sudo kill ${NCAT_PID} 2>/dev/null || true
 sudo chown ubuntu:ubuntu "${REMOTE_JSON}" || true
+sudo chown ubuntu:ubuntu /tmp/ncat_keys.log /tmp/enclave_console.log /tmp/tinyproxy.log /tmp/socat_proxy.log 2>/dev/null || true
+echo "[remote] ncat log tail:"
+tail -n 80 /tmp/ncat_keys.log 2>/dev/null || true
+echo "[remote] socat proxy log tail:"
+tail -n 80 /tmp/socat_proxy.log 2>/dev/null || true
+echo "[remote] tinyproxy log tail:"
+tail -n 80 /tmp/tinyproxy.log 2>/dev/null || true
+echo "[remote] enclave console log tail:"
+tail -n 80 /tmp/enclave_console.log 2>/dev/null || true
 ls -l "${REMOTE_JSON}"

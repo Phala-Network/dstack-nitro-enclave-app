@@ -62,7 +62,7 @@ aws ec2 wait instance-running --region "$REGION" --instance-ids "$INSTANCE_ID"
 
 PUBLIC_IP=$(aws ec2 describe-instances --region "$REGION" --instance-ids "$INSTANCE_ID" \
   --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
-echo >deployment.json <<EOF
+cat >deployment.json <<EOF
 {
   "instance_id": "$INSTANCE_ID",
   "public_ip": "$PUBLIC_IP"
