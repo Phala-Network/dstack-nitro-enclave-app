@@ -81,7 +81,7 @@ $SSH <<'EOF'
 set -euo pipefail
 
 sudo apt-get update -y
-sudo apt-get install -y build-essential linux-modules-extra-aws git docker.io cloud-guest-utils
+sudo apt-get install -y build-essential "linux-modules-extra-$(uname -r)" git docker.io cloud-guest-utils
 sudo systemctl enable --now docker
 
 # Grow disk (ignore errors if already grown)
