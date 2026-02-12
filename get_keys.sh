@@ -9,12 +9,14 @@ HOST=${HOST:-${1:-}}
 KMS_URL=${KMS_URL:-https://kms.tdxlab.dstack.org:12001}
 APP_ID=${APP_ID:-}
 KEY_PATH=${KEY_PATH:-"$PWD/nitro-enclave-key.pem"}
+SSH_USER=${SSH_USER:-ec2-user}
 REMOTE_JSON=${REMOTE_JSON:-/tmp/app_keys.json}
-REMOTE_EIF=${REMOTE_EIF:-/home/ubuntu/dstack-get-keys.eif}
-REMOTE_BIN=${REMOTE_BIN:-/home/ubuntu/dstack-util}
+REMOTE_EIF=${REMOTE_EIF:-/home/${SSH_USER}/dstack-get-keys.eif}
+REMOTE_BIN=${REMOTE_BIN:-/home/${SSH_USER}/dstack-util}
 LOCAL_JSON=${LOCAL_JSON:-"$(pwd)/app_keys.json"}
 LOCAL_ENCLAVE_LOG=${LOCAL_ENCLAVE_LOG:-"$(pwd)/enclave_console.log"}
 LOCAL_NCAT_LOG=${LOCAL_NCAT_LOG:-"$(pwd)/ncat_keys.log"}
+REMOTE_HOME="/home/${SSH_USER}"
 
 if [[ -z "${HOST}" && ! -f deployment.json ]]; then
   echo "Usage: HOST=<public_ip> KMS_URL=<https://kms> ./get_keys.sh" >&2
@@ -53,7 +55,7 @@ echo "[local] Built ${LOCAL_DSTACK}"
 
 # Copy binary and get-keys scripts to host
 echo "[local] Uploading dstack-util and get-keys scripts to host..."
-scp "${SSH_OPTS[@]}" "${LOCAL_DSTACK}" "ubuntu@${HOST}:${REMOTE_BIN}" >/dev/null
+scp "${SSH_OPTS[@]}" "${LOCAL_DSTACK}" "${SSH_USER}@${HOST}:${REMOTE_BIN}" >/dev/null
 GET_KEYS_DIR="${ROOT_DIR}/get-keys"
 if [[ ! -d "${GET_KEYS_DIR}" ]]; then
   echo "Missing directory: ${GET_KEYS_DIR}" >&2
@@ -67,17 +69,17 @@ KMS_URL_ESCAPED=$(printf '%s' "${KMS_URL}" | sed -e 's/[\\/&]/\\&/g')
 APP_ID_ESCAPED=$(printf '%s' "${APP_ID}" | sed -e 's/[\\/&]/\\&/g')
 sed -e "s/__KMS_URL__/${KMS_URL_ESCAPED}/g" -e "s/__APP_ID__/${APP_ID_ESCAPED}/g" \
   "${RUN_GET_KEYS_TEMPLATE}" > "${RUN_GET_KEYS_RENDERED}"
-ssh "${SSH_OPTS[@]}" "ubuntu@${HOST}" "rm -rf /home/ubuntu/get-keys"
-scp -r "${SSH_OPTS[@]}" "${TMP_GET_KEYS_DIR}" "ubuntu@${HOST}:/home/ubuntu/get-keys" >/dev/null
+ssh "${SSH_OPTS[@]}" "${SSH_USER}@${HOST}" "rm -rf ${REMOTE_HOME}/get-keys"
+scp -r "${SSH_OPTS[@]}" "${TMP_GET_KEYS_DIR}" "${SSH_USER}@${HOST}:${REMOTE_HOME}/get-keys" >/dev/null
 rm -rf "${TMP_GET_KEYS_DIR}"
 
-ssh "${SSH_OPTS[@]}" "ubuntu@${HOST}" REMOTE_EIF="${REMOTE_EIF}" REMOTE_JSON="${REMOTE_JSON}" \
-  bash /home/ubuntu/get-keys/remote_run.sh
+ssh "${SSH_OPTS[@]}" "${SSH_USER}@${HOST}" REMOTE_EIF="${REMOTE_EIF}" REMOTE_JSON="${REMOTE_JSON}" \
+  bash "${REMOTE_HOME}/get-keys/remote_run.sh"
 
 # Copy the json file back
-scp "${SSH_OPTS[@]}" "ubuntu@${HOST}:${REMOTE_JSON}" "${LOCAL_JSON}" >/dev/null
-scp "${SSH_OPTS[@]}" "ubuntu@${HOST}:/tmp/enclave_console.log" "${LOCAL_ENCLAVE_LOG}" >/dev/null || true
-scp "${SSH_OPTS[@]}" "ubuntu@${HOST}:/tmp/ncat_keys.log" "${LOCAL_NCAT_LOG}" >/dev/null || true
+scp "${SSH_OPTS[@]}" "${SSH_USER}@${HOST}:${REMOTE_JSON}" "${LOCAL_JSON}" >/dev/null
+scp "${SSH_OPTS[@]}" "${SSH_USER}@${HOST}:/tmp/enclave_console.log" "${LOCAL_ENCLAVE_LOG}" >/dev/null || true
+scp "${SSH_OPTS[@]}" "${SSH_USER}@${HOST}:/tmp/ncat_keys.log" "${LOCAL_NCAT_LOG}" >/dev/null || true
 
 echo "Saved app keys to ${LOCAL_JSON} (size: $(stat -c%s "${LOCAL_JSON}") bytes)"
 if [[ -f "${LOCAL_ENCLAVE_LOG}" ]]; then

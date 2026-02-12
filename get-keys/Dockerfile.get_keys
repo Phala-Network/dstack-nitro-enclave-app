@@ -1,8 +1,6 @@
 FROM public.ecr.aws/docker/library/alpine:3.19
 RUN apk add --no-cache socat iproute2
-# Add DNS resolver configuration (required for hickory-dns init)
-RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf && \
-    echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+# DNS resolver configuration is set at runtime in the entrypoint script
 COPY dstack-util /app/dstack-util
 RUN chmod +x /app/dstack-util
 COPY enclave_run_get_keys.sh /app/run.sh

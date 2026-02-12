@@ -4,6 +4,10 @@ set -e
 # Configure loopback interface (required in enclave)
 ip link set lo up 2>/dev/null || ifconfig lo up 2>/dev/null || true
 
+# Configure DNS resolver (enclave has no /etc/resolv.conf by default)
+mkdir -p /etc 2>/dev/null || true
+printf "nameserver 8.8.8.8\nnameserver 8.8.4.4\n" > /etc/resolv.conf 2>/dev/null || true
+
 # Start socat to forward TCP:3128 -> vsock CID 3 port 3128 (HTTP proxy bridge)
 socat TCP-LISTEN:3128,fork,reuseaddr VSOCK-CONNECT:3:3128 &
 sleep 1
