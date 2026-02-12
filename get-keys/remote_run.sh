@@ -54,6 +54,7 @@ sudo systemctl stop tinyproxy 2>/dev/null || true
 sudo systemctl stop squid 2>/dev/null || true
 sudo pkill tinyproxy 2>/dev/null || true
 sudo pkill squid 2>/dev/null || true
+sudo rm -f /run/squid.pid
 sleep 1
 
 if [ "${PROXY_CMD}" = "tinyproxy" ]; then
