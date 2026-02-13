@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Usage:
-#   HOST=3.227.1.201 KMS_URL=https://kms:12001 ./get_keys.sh
-#   HOST=3.227.1.201 ./get_keys.sh --show-mrs   # build EIF and print measurements only
+#   HOST=3.227.1.201 KMS_URL=https://kms:12001 APP_ID=0x... ./get_keys.sh
+#   HOST=3.227.1.201 KMS_URL=https://kms:12001 APP_ID=0x... ./get_keys.sh --show-mrs
+#
+# KMS_URL and APP_ID are baked into the EIF image and affect PCR values.
+# They MUST be the same for --show-mrs and the actual key retrieval run.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -18,7 +21,7 @@ done
 set -- "${POSITIONAL_ARGS[@]+"${POSITIONAL_ARGS[@]}"}"
 
 HOST=${HOST:-${1:-}}
-KMS_URL=${KMS_URL:-https://kms.tdxlab.dstack.org:12001}
+KMS_URL=${KMS_URL:-}
 APP_ID=${APP_ID:-}
 KEY_PATH=${KEY_PATH:-"$PWD/nitro-enclave-key.pem"}
 SSH_USER=${SSH_USER:-ec2-user}
@@ -36,8 +39,8 @@ if [[ -z "${HOST}" && ! -f deployment.json ]]; then
 fi
 HOST=${HOST:-$(jq -r .public_ip < deployment.json)}
 
-if [[ "${SHOW_MRS}" -eq 0 && -z "${KMS_URL}" ]]; then
-  echo "KMS_URL is required" >&2
+if [[ -z "${KMS_URL}" ]]; then
+  echo "KMS_URL is required (it is baked into the EIF image and affects PCR values)" >&2
   exit 1
 fi
 
