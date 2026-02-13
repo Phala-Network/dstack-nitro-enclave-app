@@ -115,11 +115,11 @@ if [ "${DEBUG_ENCLAVE}" = "1" ]; then
   echo "[remote] WARNING: running in debug mode — PCR values will be zeroed"
   RUN_ARGS="${RUN_ARGS} --debug-mode"
 fi
+sudo rm -f /tmp/enclave_console.log
 sudo nitro-cli run-enclave ${RUN_ARGS}
 ENCLAVE_ID=$(sudo nitro-cli describe-enclaves | jq -r '.[0].EnclaveID // empty')
 if [ -n "${ENCLAVE_ID}" ] && [ "${DEBUG_ENCLAVE}" = "1" ]; then
   echo "[remote] Capturing enclave console output..."
-  sudo rm -f /tmp/enclave_console.log
   sudo timeout 25 nitro-cli console --enclave-id "${ENCLAVE_ID}" 2>&1 \
     | sudo tee /tmp/enclave_console.log >/dev/null || true
 fi
