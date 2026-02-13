@@ -1,9 +1,21 @@
 #!/usr/bin/env bash
 # Usage:
-#   HOST=3.227.1.201 ./get_keys.sh
+#   HOST=3.227.1.201 KMS_URL=https://kms:12001 ./get_keys.sh
+#   HOST=3.227.1.201 ./get_keys.sh --show-mrs   # build EIF and print measurements only
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Parse flags
+SHOW_MRS=0
+POSITIONAL_ARGS=()
+for arg in "$@"; do
+  case "${arg}" in
+    --show-mrs) SHOW_MRS=1 ;;
+    *) POSITIONAL_ARGS+=("${arg}") ;;
+  esac
+done
+set -- "${POSITIONAL_ARGS[@]+"${POSITIONAL_ARGS[@]}"}"
 
 HOST=${HOST:-${1:-}}
 KMS_URL=${KMS_URL:-https://kms.tdxlab.dstack.org:12001}
@@ -24,7 +36,7 @@ if [[ -z "${HOST}" && ! -f deployment.json ]]; then
 fi
 HOST=${HOST:-$(jq -r .public_ip < deployment.json)}
 
-if [[ -z "${KMS_URL}" ]]; then
+if [[ "${SHOW_MRS}" -eq 0 && -z "${KMS_URL}" ]]; then
   echo "KMS_URL is required" >&2
   exit 1
 fi
@@ -53,7 +65,7 @@ cargo build --release -p dstack-util --target x86_64-unknown-linux-musl >/dev/nu
 LOCAL_DSTACK="$(pwd)/target/x86_64-unknown-linux-musl/release/dstack-util"
 echo "[local] Built ${LOCAL_DSTACK}"
 
-# Copy binary and get-keys scripts to host
+# Upload binary and build scripts
 echo "[local] Uploading dstack-util and get-keys scripts to host..."
 scp "${SSH_OPTS[@]}" "${LOCAL_DSTACK}" "${SSH_USER}@${HOST}:${REMOTE_BIN}" >/dev/null
 GET_KEYS_DIR="${ROOT_DIR}/get-keys"
@@ -73,8 +85,34 @@ ssh "${SSH_OPTS[@]}" "${SSH_USER}@${HOST}" "rm -rf ${REMOTE_HOME}/get-keys"
 scp -r "${SSH_OPTS[@]}" "${TMP_GET_KEYS_DIR}" "${SSH_USER}@${HOST}:${REMOTE_HOME}/get-keys" >/dev/null
 rm -rf "${TMP_GET_KEYS_DIR}"
 
+# --show-mrs: build EIF, print PCR values and OS_IMAGE_HASH, then exit
+if [[ "${SHOW_MRS}" -eq 1 ]]; then
+  ssh "${SSH_OPTS[@]}" "${SSH_USER}@${HOST}" bash -s <<'SHOW_MRS_EOF'
+set -euo pipefail
+[ -f /etc/profile.d/nitro-cli-env.sh ] && source /etc/profile.d/nitro-cli-env.sh || true
+SCRIPT_DIR="${HOME}/get-keys"
+chmod +x "${SCRIPT_DIR}/enclave_run_get_keys.sh"
+cp -f "${HOME}/dstack-util" "${SCRIPT_DIR}/dstack-util"
+sudo docker build -t dstack-get-keys -f "${SCRIPT_DIR}/Dockerfile.get_keys" "${SCRIPT_DIR}" >/dev/null
+sudo nitro-cli build-enclave --docker-uri dstack-get-keys --output-file /tmp/show-mrs.eif > /tmp/build-enclave.json
+PCR0=$(jq -r '.Measurements.PCR0' /tmp/build-enclave.json)
+PCR1=$(jq -r '.Measurements.PCR1' /tmp/build-enclave.json)
+PCR2=$(jq -r '.Measurements.PCR2' /tmp/build-enclave.json)
+OS_IMAGE_HASH=$(python3 -c "
+import hashlib
+h = hashlib.sha256(bytes.fromhex('${PCR0}') + bytes.fromhex('${PCR1}') + bytes.fromhex('${PCR2}')).hexdigest()
+print('0x' + h)
+")
+echo "PCR0: ${PCR0}"
+echo "PCR1: ${PCR1}"
+echo "PCR2: ${PCR2}"
+echo "OS_IMAGE_HASH: ${OS_IMAGE_HASH}"
+SHOW_MRS_EOF
+  exit 0
+fi
+
 ssh "${SSH_OPTS[@]}" "${SSH_USER}@${HOST}" REMOTE_EIF="${REMOTE_EIF}" REMOTE_JSON="${REMOTE_JSON}" \
-  bash "${REMOTE_HOME}/get-keys/remote_run.sh"
+  DEBUG_ENCLAVE="${DEBUG_ENCLAVE:-0}" bash "${REMOTE_HOME}/get-keys/remote_run.sh"
 
 # Copy the json file back
 scp "${SSH_OPTS[@]}" "${SSH_USER}@${HOST}:${REMOTE_JSON}" "${LOCAL_JSON}" >/dev/null

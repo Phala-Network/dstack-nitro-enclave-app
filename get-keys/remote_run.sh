@@ -40,7 +40,9 @@ chmod +x "${SCRIPT_DIR}/enclave_run_get_keys.sh"
 cp -f "${HOME}/dstack-util" "${SCRIPT_DIR}/dstack-util"
 
 sudo docker build -t dstack-get-keys -f "${SCRIPT_DIR}/Dockerfile.get_keys" "${SCRIPT_DIR}" >/dev/null
-sudo nitro-cli build-enclave --docker-uri dstack-get-keys --output-file "${REMOTE_EIF}" >/dev/null
+sudo nitro-cli build-enclave --docker-uri dstack-get-keys --output-file "${REMOTE_EIF}" > /tmp/build-enclave.json
+echo "[remote] EIF build measurements:"
+jq -r '.Measurements | "  PCR0: \(.PCR0)\n  PCR1: \(.PCR1)\n  PCR2: \(.PCR2)"' /tmp/build-enclave.json
 
 # Ensure allocator has enough CPUs for enclave
 if [ -f /etc/nitro_enclaves/allocator.yaml ]; then
@@ -105,10 +107,17 @@ sudo timeout 40 ncat --vsock -l 9999 > "${REMOTE_JSON}" 2>/tmp/ncat_keys.log &
 NCAT_PID=$!
 sleep 2
 
-# Run enclave
-sudo nitro-cli run-enclave --cpu-count 2 --memory 256 --enclave-cid 16 --eif-path "${REMOTE_EIF}" --debug-mode
+# Run enclave (debug mode zeros out PCR values, breaking attestation;
+# only enable via DEBUG_ENCLAVE=1 for troubleshooting)
+DEBUG_ENCLAVE="${DEBUG_ENCLAVE:-0}"
+RUN_ARGS="--cpu-count 2 --memory 256 --enclave-cid 16 --eif-path ${REMOTE_EIF}"
+if [ "${DEBUG_ENCLAVE}" = "1" ]; then
+  echo "[remote] WARNING: running in debug mode — PCR values will be zeroed"
+  RUN_ARGS="${RUN_ARGS} --debug-mode"
+fi
+sudo nitro-cli run-enclave ${RUN_ARGS}
 ENCLAVE_ID=$(sudo nitro-cli describe-enclaves | jq -r '.[0].EnclaveID // empty')
-if [ -n "${ENCLAVE_ID}" ]; then
+if [ -n "${ENCLAVE_ID}" ] && [ "${DEBUG_ENCLAVE}" = "1" ]; then
   echo "[remote] Capturing enclave console output..."
   sudo rm -f /tmp/enclave_console.log
   sudo timeout 25 nitro-cli console --enclave-id "${ENCLAVE_ID}" 2>&1 \
