@@ -13,12 +13,12 @@ ENCLAVE_MEM="${ENCLAVE_MEM:-512}"
 
 export AWS_PAGER=""
 
-echo "[1/8] Discover default VPC/subnet/sg"
+echo "[1/6] Discover default VPC/subnet/sg"
 VPC_ID=$(aws ec2 describe-vpcs --region "$REGION" --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
 SUBNET_ID=$(aws ec2 describe-subnets --region "$REGION" --filters Name=vpc-id,Values="$VPC_ID" --query 'Subnets[0].SubnetId' --output text)
 SG_ID=$(aws ec2 describe-security-groups --region "$REGION" --filters Name=vpc-id,Values="$VPC_ID" Name=group-name,Values=default --query 'SecurityGroups[0].GroupId' --output text)
 
-echo "[2/8] Ensure key pair"
+echo "[2/6] Ensure key pair"
 if aws ec2 describe-key-pairs --region "$REGION" --key-names "$KEY_NAME" >/dev/null 2>&1; then
   if [ ! -f "$KEY_PATH" ]; then
     echo "Key pair exists but $KEY_PATH not found. Aborting."
@@ -30,17 +30,17 @@ else
   chmod 400 "$KEY_PATH"
 fi
 
-echo "[3/8] Allow SSH from current IP"
+echo "[3/6] Allow SSH from current IP"
 MYIP=$(curl -s https://checkip.amazonaws.com)
 aws ec2 authorize-security-group-ingress --region "$REGION" \
   --group-id "$SG_ID" --protocol tcp --port 22 --cidr "${MYIP}/32" >/dev/null 2>&1 || true
 
-echo "[4/8] Find Amazon Linux 2023 AMI"
+echo "[4/6] Find Amazon Linux 2023 AMI"
 AMI_ID=$(aws ec2 describe-images --region "$REGION" --owners amazon \
   --filters Name=name,Values='al2023-ami-2023.*-x86_64' Name=state,Values=available \
   --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' --output text)
 
-echo "[5/8] Launch EC2 instance (with enclave support)"
+echo "[5/6] Launch EC2 instance (with enclave support)"
 INSTANCE_ID=$(aws ec2 run-instances --region "$REGION" \
   --image-id "$AMI_ID" \
   --instance-type "$INSTANCE_TYPE" \
@@ -63,7 +63,7 @@ cat >deployment.json <<EOF
 }
 EOF
 
-echo "[6/8] SSH to instance: $PUBLIC_IP"
+echo "[6/6] SSH to instance: $PUBLIC_IP"
 SSH="ssh -o StrictHostKeyChecking=no -i $KEY_PATH ec2-user@$PUBLIC_IP"
 
 $SSH <<'EOF'
